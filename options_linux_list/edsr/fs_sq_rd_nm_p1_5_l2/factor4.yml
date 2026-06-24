@@ -1,0 +1,168 @@
+# general settings
+name: EDSR
+exp_name: sq_rd_nm_fs_p1_5 # sq / sq_rd / sq_rd_nm
+model_type: ReconstructionModel
+scale: 1
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 100
+
+# generate settings
+settings:
+  factor: 4
+  is_intp: true # false: upsample (LR size)
+  is_krig: true # true
+  is_random: false # true / false
+  slide_window: 0
+  train_prop: 1.5 # 7500 // train_prop # 1.2 / 1.5 / 3
+  test_prop: 15
+  rec_path: ../recordings_50cells_SqMEA-10-15_30.0_10.0uV.h5 # sq: ../recordings_50cells_SqMEA-10-15_30.0_10.0uV.h5 # np: ../recordings_60cells_Neuropixels-128_30.0_10.0uV.h5
+  save_path: ../generate_traces_for_train/sq_nm # sq / np ||| generate_traces_for_train_norm / generate_traces_for_train
+  chl_path: ../bad_chls/sq
+  norm_path: ../zscore_info/sq 
+  weights_path: /root/autodl-tmp/weights/factor_4/fs_sq100_rd_nm_p1_5_l2.pth # 权重路径
+  is_whole: True # pattern: whole (True) / partial (False)
+  recon_method: edsr
+  base_loss_path: loss_dict
+  channel_num: 100
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: TrainSet
+    type: Dataset_Reconstruction
+    sigma_type: random
+    sigma_range: [0,50]
+    in_ch: 1    ## Grayscale image
+    dataroot_gt: ../generate_traces_for_train/sq_nm/generate_krig_traces_factor_4/train # sq / np
+    dataroot_lq: none
+    geometric_augs: False
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+
+    # data loader
+    use_shuffle: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 8 # 每个gpu的batch size
+
+    ### ------- Training on single fixed-patch size 128x128---------
+    mini_batch_sizes: [8] # 8
+    iters: [300000] # 300000
+    gt_size: 128 
+    gt_sizes: [128]
+    ### ------------------------------------------------------------
+
+    dataset_enlarge_ratio: 1
+    prefetch_mode: cuda
+    pin_memory: True
+
+  val:
+    name: ValSet
+    type: Dataset_Reconstruction
+    sigma_test: 25
+    in_ch: 1  ## Grayscale image
+    dataroot_gt: ../generate_traces_for_train/sq_nm/generate_krig_traces_factor_4/test # sq / np
+    dataroot_lq: none
+    io_backend:
+      type: disk
+
+# network structures
+network_g:
+  type: EDSR
+  num_channels: 1
+  factor: 1
+  width: 64
+  depth: 16
+  kernel_size: 3
+
+# path
+path:
+  pretrain_network_g: /root/autodl-tmp/weights/factor_4/single_np128_rd_nm.pth
+  strict_load_g: true
+  resume_state: ~
+
+# training settings
+train:
+  total_iter: 300000 # 300000 
+  warmup_iter: -1 # no warm up
+  use_grad_clip: true
+
+  # Split 300k iterations into two cycles.
+  # 1st cycle: fixed 3e-4 LR for 92k iters.
+  # 2nd cycle: cosine annealing (3e-4 to 1e-6) for 208k iters.
+  scheduler:
+    type: CosineAnnealingRestartCyclicLR
+    periods: [92000, 208000] # [92000, 208000]
+    restart_weights: [1,1]
+    eta_mins: [0.0003,0.000001]
+    # eta_mins: [0.00003,0.000001]
+
+  mixing_augs:
+    mixup: true
+    mixup_beta: 1.2
+    use_identity: true
+
+  optim_g:
+    type: AdamW
+    lr: !!float 3e-4
+    weight_decay: !!float 1e-4
+    betas: [0.9, 0.999]
+
+  # losses
+  pixel_opt:
+    type: MSELoss # L1Loss
+    loss_weight: 1
+    reduction: mean
+  
+  # ========== Anti-Catastrophic Forgetting Strategies ==========
+  # 1. L2-SP (Simple Parameter Penalty): penalize deviation from pretrained weights
+  l2_sp_weight: 0.0001  # 0 = disabled; 1e-5 ~ 1e-3 recommended
+
+  # 2. Layer-wise LR Decay: shallow layers use smaller lr to preserve low-level features
+  layer_lr_decay: 1.0  # 1.0 = disabled; 0.75 ~ 0.95 recommended
+
+  # 3. EWC (Elastic Weight Consolidation): importance-weighted parameter penalty
+  ewc_lambda: 0.0  # 0 = disabled; 10 ~ 1000 recommended
+
+  # 4. Knowledge Distillation: output and feature-level distillation from frozen teacher
+  kd_weight: 0.0         # 0 = disabled; 0.1 ~ 1.0 recommended
+  kd_feature_weight: 0.0  # 0 = disabled; 0.01 ~ 0.1 recommended
+  kd_temperature: 4.0     # temperature for softening KD loss
+
+  early_stop:
+    enabled: true
+    metric: MSELoss      # 监控的指标名，需与 validation 返回的字典键一致
+    mode: min            # "max"表示指标越大越好（如PSNR），"min"表示越小越好（如loss）
+    patience: 6         # 容忍多少个验证周期无改善
+    min_delta: 0.00001    # 最小改善阈值，避免微小波动被计入
+
+# validation settings
+val:
+  window_size: 8
+  val_freq: !!float 1e3 # 8e3
+  save_img: false
+  rgb2bgr: false
+  use_image: false
+  max_minibatch: 8
+
+  metrics:
+#    psnr: # metric name, can be arbitrary
+#      type: calculate_psnr
+#      crop_border: 0
+#      test_y_channel: false
+    mse:
+      type: calculate_mse
+
+# logging settings
+logger:
+  print_freq: 1000
+  save_checkpoint_freq: !!float 1e3
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
