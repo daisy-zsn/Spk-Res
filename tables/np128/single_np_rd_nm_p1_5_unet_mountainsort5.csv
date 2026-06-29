@@ -1,0 +1,4 @@
+factor,method,num_sorter,num_well_detected,recall,precision,f1
+16,krig,54,40,0.667,0.741,0.702
+16,remove,57,40,0.667,0.702,0.684
+16,edsr,62,43,0.717,0.694,0.705

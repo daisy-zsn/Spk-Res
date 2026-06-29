@@ -23,16 +23,16 @@ plt.rcParams.update({
     'legend.fontsize': 8,
     'xtick.labelsize': 8,
     'ytick.labelsize': 8,
-    'figure.dpi': 300,
-    'savefig.dpi': 300,
+    'figure.dpi': 800,
+    'savefig.dpi': 800,
     'axes.spines.top': False,
     'axes.spines.right': False,
     'axes.grid': False,
 })
 
-SORTER_DIR = os.path.join(os.path.dirname(__file__), '.')
-TABLE_DIR = os.path.join(SORTER_DIR, 'tables')
-FIG_DIR = os.path.join(SORTER_DIR, 'figures')
+SORTER_DIR = os.path.join(os.path.dirname(__file__), 'sorter')
+TABLE_DIR = 'tables'
+FIG_DIR = 'figures'
 os.makedirs(TABLE_DIR, exist_ok=True)
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -46,19 +46,19 @@ MODELS = ['edsr', 'spkres']
 # Groups: (label, baseline_dir, methods_dict)
 # SpkRes uses same config names as EDSR, just under sorter/spkres/
 GROUPS = [
-    ('np128', 'single_np128_rd_nm', {
+    ('np128', 'single_np_rd_nm', {
         'direct_transfer': ['rec_np_rd_nm_p1_5'],
         'l2': ['rec_np_rd_nm_p1_5_l2'],
         'llr': ['rec_np_rd_nm_p1_5_llr'],
         'ewc': ['rec_np_rd_nm_p1_5_ewc'],
         'kd': ['rec_np_rd_nm_p1_5_kd'],
     }),
-    ('sqmea', 'single_sq100_rd_nm', {
-        'direct_transfer': ['fs_sq_rd_nm_p1_5', 'fs_sq100_rd_nm_p1_5'],
-        'l2': ['fs_sq_rd_nm_p1_5_l2', 'fs_sq100_rd_nm_p1_5_l2'],
-        'llr': ['fs_sq_rd_nm_p1_5_llr', 'fs_sq100_rd_nm_p1_5_llr'],
-        'ewc': ['fs_sq_rd_nm_p1_5_ewc', 'fs_sq100_rd_nm_p1_5_ewc'],
-        'kd': ['fs_sq_rd_nm_p1_5_kd', 'fs_sq100_rd_nm_p1_5_kd'],
+    ('sqmea', 'single_sq_rd_nm', {
+        'direct_transfer': ['fs_sq_rd_nm_p1_5'],
+        'l2': ['fs_sq_rd_nm_p1_5_l2'],
+        'llr': ['fs_sq_rd_nm_p1_5_llr'],
+        'ewc': ['fs_sq_rd_nm_p1_5_ewc'],
+        'kd': ['fs_sq_rd_nm_p1_5_kd'],
     }),
 ]
 
@@ -80,6 +80,7 @@ METHOD_COLORS = [
     ['#8CB896', '#A0C8A0'],    # ewc — muted green / light green
     ['#C5A0C5', '#D8B0D8'],    # kd — muted purple / light purple
 ]
+
 
 MODEL_LABEL = {'edsr': 'EDSR', 'spkres': 'SpkRes'}
 MODEL_HATCHES = {'edsr': '', 'spkres': '//'}
@@ -115,9 +116,8 @@ def compute_metrics(df):
         redundant = float(row['num_redundant'])
         overmerged = float(row['num_overmerged'])
 
-        recall = well / gt if gt > 0 else 0
-        tp_denom = detected - fp - redundant - overmerged
-        precision = tp_denom / detected if detected > 0 else 0
+        recall = well / gt if gt > 0 else 0 
+        precision = well / detected if detected > 0 else 0
         f1 = 2 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0
 
         results[sorter] = {'recall': recall, 'precision': precision, 'f1': f1}
@@ -211,40 +211,28 @@ def build_detail_table(model_data, method_order, metric):
     return pd.DataFrame(rows)
 
 
-def plot_group_figure(group_label, group_title, all_data, method_order):
-    """Generate bar charts comparing EDSR vs SpkRes for each method/metric."""
+def plot_model_figure(group_label, model, model_label, all_data, method_order):
+    """Generate bar chart for a single model with all methods."""
+    model_data = all_data.get(model, {})
     all_methods = ['baseline'] + method_order
     x = np.arange(len(FACTOR_DISPLAY))
-    n_models = len(MODELS)
     n_methods = len(all_methods)
-    width = 0.07
+    width = 0.12
+    colors = ['#B0B0B0', '#C98F8F', "#7E9FC4", '#D4A87C', '#8CB896', '#C5A0C5']
 
     for metric in METRICS:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
 
-        multiplier = 0
+        avg_vals = get_avg_values(model_data, method_order, metric)
         for mi, method in enumerate(all_methods):
-            for mdi, model in enumerate(MODELS):
-                model_data = all_data.get(model, {})
-                avg_vals = get_avg_values(model_data, method_order, metric)
-                vals = avg_vals.get(method, [np.nan] * len(FACTORS))
+            vals = avg_vals.get(method, [np.nan] * len(FACTORS))
+            offset = width * (mi - (n_methods - 1) / 2)
+            ax.bar(x + offset, vals, width,
+                   label=METHOD_LABELS.get(method, method),
+                   color=colors[mi],
+                   edgecolor='black', linewidth=0.3)
 
-                offset = width * (multiplier - (n_methods * n_models - 1) / 2)
-                label = f'{MODEL_LABEL[model]}-{METHOD_LABELS.get(method, method)}' if mi == 0 else \
-                        f'{MODEL_LABEL[model]}-{METHOD_LABELS.get(method, method)}'
-                # Actually, just use the method label and differentiate by hatch/color pair
-                display_label = f'{MODEL_LABEL[model]}' if mi == 0 and mdi == 0 else \
-                                f'{METHOD_LABELS.get(method, method)}' if mdi == 0 else None
-                # Simpler: label = method + model
-                short_label = f'{METHOD_LABELS.get(method, method)} ({MODEL_LABEL[model]})'
-                ax.bar(x + offset, vals, width,
-                       label=short_label,
-                       color=METHOD_COLORS[mi][mdi],
-                       hatch=MODEL_HATCHES[model],
-                       edgecolor='black', linewidth=0.3)
-                multiplier += 1
-
-        ax.set_title(metric.capitalize(), fontsize=8)
+        ax.set_title(f'{model_label} — {metric.capitalize()}', fontsize=8)
         ax.set_xlabel('Bad Channel Ratio')
         ax.set_xticks(x)
         ax.set_xticklabels(FACTOR_DISPLAY)
@@ -253,7 +241,7 @@ def plot_group_figure(group_label, group_title, all_data, method_order):
                   bbox_to_anchor=(0.02, 1.02))
 
         plt.tight_layout()
-        out_path = os.path.join(FIG_DIR, f'cmp_methods_{group_label}_{metric}.png')
+        out_path = os.path.join(FIG_DIR, f'cmp_methods_{model}_{group_label}_{metric}.tiff')
         plt.savefig(out_path, bbox_inches='tight')
         plt.close()
         print(f"  Saved figure: {out_path}")
@@ -303,7 +291,8 @@ def main():
                 df_detail.to_csv(detail_csv_path, index=False)
                 print(f"  Saved (per sorter): {detail_csv_path}")
 
-        plot_group_figure(group_label, group_title, all_data, method_order)
+        for model in MODELS:
+            plot_model_figure(group_label, model, MODEL_LABEL[model], all_data, method_order)
 
     print(f"\n{'='*90}")
     print("Done.")

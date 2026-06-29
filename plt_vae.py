@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Compare VAE vs EDSR vs SpkRes reconstruction on spike sorting performance.
+Compare VAE vs SpkRes reconstruction on spike sorting performance.
 
-Output: tables and figures saved under sorter/tables/ and sorter/figures/.
+Output: tables and figures saved under tables/ and figures/.
 """
 
 import os
@@ -23,16 +23,16 @@ plt.rcParams.update({
     'legend.fontsize': 8,
     'xtick.labelsize': 8,
     'ytick.labelsize': 8,
-    'figure.dpi': 300,
-    'savefig.dpi': 300,
+    'figure.dpi': 800,
+    'savefig.dpi': 800,
     'axes.spines.top': False,
     'axes.spines.right': False,
     'axes.grid': False,
 })
 
-SORTER_DIR = os.path.join(os.path.dirname(__file__), '.')
-TABLE_DIR = os.path.join(SORTER_DIR, 'tables')
-FIG_DIR = os.path.join(SORTER_DIR, 'figures')
+SORTER_DIR = os.path.join(os.path.dirname(__file__), 'sorter')
+TABLE_DIR = 'tables'
+FIG_DIR = 'figures'
 os.makedirs(TABLE_DIR, exist_ok=True)
 os.makedirs(FIG_DIR, exist_ok=True)
 
@@ -40,22 +40,19 @@ FACTORS = ['factor_16', 'factor_8', 'factor_4', 'factor_2']
 FACTOR_DISPLAY = ['1/16', '1/8', '1/4', '1/2']
 METRICS = ['recall', 'precision', 'f1']
 
-# Groups: (label, title, edsr_config, vae_config, spkres_config)
-# VAE only available for EDSR; SpkRes used as additional baseline
+# Groups: (label, title, vae_config, spkres_config)
 GROUPS = [
-    ('np', 'NP — VAE vs EDSR vs SpkRes',
-     {'model': 'edsr', 'config': 'single_np128_rd_nm'},
+    ('np', 'NP — VAE vs SpkRes',
      {'model': 'edsr', 'config': 'single_np_rd_nm_p1_5_vae'},
      {'model': 'spkres', 'config': 'single_np_rd_nm'}),
-    ('sq', 'SQ — VAE vs EDSR vs SpkRes',
-     {'model': 'edsr', 'config': 'single_sq100_rd_nm'},
+    ('sq', 'SQ — VAE vs SpkRes',
      {'model': 'edsr', 'config': 'single_sq_rd_nm_p1_5_vae'},
      {'model': 'spkres', 'config': 'single_sq_rd_nm'}),
 ]
 
-COLORS = {'EDSR': '#8CB896', 'VAE': '#D4A87C', 'SpkRes': '#BC8F8F'}
-MARKERS = {'EDSR': 'o', 'VAE': 's', 'SpkRes': 'D'}
-ORDER = ['EDSR', 'VAE', 'SpkRes']
+COLORS = {'VAE': '#D4A87C', 'SpkRes': '#BC8F8F'}
+MARKERS = {'VAE': 's', 'SpkRes': 'D'}
+ORDER = ['VAE', 'SpkRes']
 
 
 def load_csv(dir_path, model):
@@ -80,8 +77,7 @@ def compute_metrics(df):
         overmerged = float(row['num_overmerged'])
 
         recall = well / gt if gt > 0 else 0
-        tp_denom = detected - fp - redundant - overmerged
-        precision = tp_denom / detected if detected > 0 else 0
+        precision = well / detected if detected > 0 else 0
         f1 = 2 * recall * precision / (recall + precision) if (recall + precision) > 0 else 0
 
         results[sorter] = {'recall': recall, 'precision': precision, 'f1': f1}
@@ -90,8 +86,8 @@ def compute_metrics(df):
 
 def collect_data(specs):
     """Collect data for multiple methods.
-    specs = {'EDSR': {'model': 'edsr', 'config': '...'}, 'VAE': {...}, 'SpkRes': {...}}
-    Returns dict: {factor: {'EDSR': {sorter: metrics}, 'VAE': {...}, 'SpkRes': {...}}}
+    specs = {'VAE': {'model': 'edsr', 'config': '...'}, 'SpkRes': {...}}
+    Returns dict: {factor: {'VAE': {sorter: metrics}, 'SpkRes': {...}}}
     """
     all_data = {}
     for factor_dir in FACTORS:
@@ -107,7 +103,7 @@ def collect_data(specs):
 
 
 def build_avg_table(all_data, metric):
-    """rows = Factor, cols = EDSR / VAE / SpkRes, cells = avg ± std across sorters."""
+    """rows = Factor, cols = VAE / SpkRes, cells = avg ± std across sorters."""
     rows = []
     for factor_dir in FACTORS:
         factor_label = int(factor_dir.replace('factor_', ''))
@@ -125,7 +121,7 @@ def build_avg_table(all_data, metric):
 
 
 def build_detail_table(all_data, metric):
-    """rows = Factor x Sorter, cols = EDSR / VAE / SpkRes"""
+    """rows = Factor x Sorter, cols = VAE / SpkRes"""
     rows = []
     for factor_dir in FACTORS:
         factor_label = int(factor_dir.replace('factor_', ''))
@@ -192,16 +188,17 @@ def plot_all_groups_2x3(all_data_np, all_data_sq):
 
             if metric == 'precision':
                 if col_idx == 0:
-                    ax.set_ylim(0.4, 1.0)
+                    ax.set_ylim(0.2, 1.0)
                 else:
-                    ax.set_ylim(0.6, 1.0)
+                    ax.set_ylim(0.2, 1.0)
             elif metric == 'recall':
                 if col_idx == 1:
                     ax.set_ylim(0.0, 0.8)
                 else:
                     ax.set_ylim(0.3, 1.0)
             else:
-                ax.set_ylim(0.3, 1.0)
+                ax.set_ylim(0.2, 1.0)
+        
 
     handles = [plt.Line2D([0], [0], color=COLORS[m], marker=MARKERS[m], linestyle='-',
                           linewidth=1, markersize=4) for m in ORDER]
@@ -209,7 +206,7 @@ def plot_all_groups_2x3(all_data_np, all_data_sq):
                ncol=1, frameon=False, labelspacing=0.18)
 
     plt.tight_layout(pad=0.8)
-    out_path = os.path.join(FIG_DIR, 'cmp_vae_edsr_spkres.png')
+    out_path = os.path.join(FIG_DIR, 'cmp_vae_spkres.tiff')
     plt.savefig(out_path, bbox_inches='tight')
     plt.close()
     print(f"  Saved figure: {out_path}")
@@ -224,11 +221,11 @@ def print_table(title, df):
 
 def main():
     all_data_dict = {}
-    for group_label, group_title, edsr_spec, vae_spec, spkres_spec in GROUPS:
-        specs = {'EDSR': edsr_spec, 'VAE': vae_spec, 'SpkRes': spkres_spec}
+    for group_label, group_title, vae_spec, spkres_spec in GROUPS:
+        specs = {'VAE': vae_spec, 'SpkRes': spkres_spec}
         print(f"\n{'#'*80}")
         print(f"#  Group: {group_label} — {group_title}")
-        print(f"#  EDSR: {edsr_spec['config']}  |  VAE: {vae_spec['config']}  |  SpkRes: {spkres_spec['config']}")
+        print(f"#  VAE: {vae_spec['config']}  |  SpkRes: {spkres_spec['config']}")
         print(f"{'#'*80}")
 
         all_data = collect_data(specs)
@@ -241,11 +238,11 @@ def main():
             df_avg = build_avg_table(all_data, metric)
             print_table(f"{group_label} — {metric} (avg ± std)", df_avg)
 
-            csv_path = os.path.join(TABLE_DIR, f'vae_vs_edsr_spkres_{group_label}_{metric}.csv')
+            csv_path = os.path.join(TABLE_DIR, f'vae_vs_spkres_{group_label}_{metric}.csv')
             df_avg.to_csv(csv_path, index=False)
             print(f"  Saved (avg): {csv_path}")
 
-            detail_csv_path = os.path.join(TABLE_DIR, f'vae_vs_edsr_spkres_{group_label}_{metric}_per_sorter.csv')
+            detail_csv_path = os.path.join(TABLE_DIR, f'vae_vs_spkres_{group_label}_{metric}_per_sorter.csv')
             df_detail.to_csv(detail_csv_path, index=False)
             print(f"  Saved (per sorter): {detail_csv_path}")
 

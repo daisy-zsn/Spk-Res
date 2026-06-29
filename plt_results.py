@@ -36,8 +36,8 @@ plt.rcParams.update({
     'legend.fontsize': 8,
     'xtick.labelsize': 8,
     'ytick.labelsize': 8,
-    'figure.dpi': 300,
-    'savefig.dpi': 300,
+    'figure.dpi': 800,
+    'savefig.dpi': 800,
     'axes.spines.top': False,
     'axes.spines.right': False,
     'axes.grid': False,
@@ -179,12 +179,31 @@ def _collapse_configs(df_avg):
 def plot_method_comparison(df, electrode='np128', save_path=None):
     """
     核心图: 四种重建方法横向对比 (均 w/o Normalization)。
+    生成两幅子图: Bar (Well-Detected Units) + F1 (%)。
+    同时保存 per-sorter CSV 表格。
     """
+    # 平均数据用于绘图
     df_avg = get_avg_across_sorters(df)
-    edf = _collapse_configs(df_avg[(df_avg['electrode'] == electrode) &
-                          (df_avg['use_norm'] == 'w/o Normalization')].copy())
-    factors = _get_factors_desc(edf)
+    edf_all_cfg = df_avg[(df_avg['electrode'] == electrode) & (df_avg['use_norm'] == 'w/o Normalization')].copy()
+    edf_all_cfg = _compute_metrics(edf_all_cfg)
+    factors = _get_factors_desc(edf_all_cfg)
 
+    # per-sorter 原始数据用于表格
+    edf_raw = df[(df['electrode'] == electrode) &
+                 (df['use_norm'] == 'w/o Normalization')].copy()
+    edf_raw = _compute_per_sorter_metrics(edf_raw)
+
+    if save_path:
+        base = save_path.rsplit('.', 1)[0]
+        ext = save_path.rsplit('.', 1)[1] if '.' in save_path else 'tiff'
+    
+    # without normalization  
+    if electrode == 'np128':
+        cfg_name = 'single_np_rd'
+    elif electrode == 'sq100':
+        cfg_name = 'single_sq_rd'
+    edf = edf_all_cfg[edf_all_cfg['config'] == cfg_name]
+    # ---- 子图1: Well-Detected Units 柱状图 ----
     fig, ax = plt.subplots(1, 1, figsize=(4, 3))
     x = np.arange(len(factors))
     bar_width = 0.2
@@ -205,10 +224,80 @@ def plot_method_comparison(df, electrode='np128', save_path=None):
     plt.tight_layout()
     plt.show()
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        print(f'[Saved] {save_path}')
-    plt.close()
+        fig.savefig(f'{base}_bar.{ext}', bbox_inches='tight')
+        print(f'[Saved] {base}_bar.{ext}')
+    plt.close(fig)
 
+    # ---- 子图2: F1 Score 折线图 ----
+    fig2, ax2 = plt.subplots(1, 1, figsize=(4, 3))
+    for method in METHODS:
+        ndf = edf[edf['method'] == method].set_index('factor').reindex(factors).reset_index()
+        if len(ndf) == 0:
+            continue
+        pos = [factors.index(f) for f in ndf['factor']]
+        ax2.plot(pos, ndf['f1'], marker='o', linestyle='-',
+                color=METHOD_COLORS[method], linewidth=1, markersize=2,
+                label=METHOD_LABELS[method])
+
+    _add_factor_labels(ax2, factors)
+    ax2.set_ylabel('F1 (%)')
+    ax2.set_ylim(0, 105)
+    ax2.set_title(f'F1 Score — {ELECTRODE_LABELS.get(electrode, electrode)}', fontsize=8)
+    ax2.legend(fontsize=8, loc='lower left', bbox_to_anchor=(0.02, 0.02), frameon=False)
+    plt.tight_layout()
+    if save_path:
+        fig2.savefig(f'{base}_f1.{ext}', bbox_inches='tight')
+        print(f'[Saved] {base}_f1.{ext}')
+    plt.close(fig2)
+
+    # ---- 导出 per-sorter CSV 表格 ----
+    generate_method_comparison_tables(edf_raw, factors, electrode)
+
+
+def _compute_per_sorter_metrics(edf):
+    """对 per-sorter 原始数据计算 Recall, Precision, F1 (小数形式)。"""
+    edf['recall'] = edf['num_well_detected'] / edf['num_gt']
+    edf['precision'] = edf['num_well_detected'] / edf['num_sorter']
+    edf['f1'] = 2 * (edf['recall'] * edf['precision']) / (edf['recall'] + edf['precision']).replace(0, np.nan)
+    return edf
+
+
+def generate_method_comparison_tables(edf_raw, factors, electrode):
+    """将 method comparison 的 per-sorter 数据导出为方法对比 CSV 和 LaTeX 三线表。"""
+    os.makedirs(f'tables/{electrode}', exist_ok=True)
+    # os.makedirs(f'tables_latex/{electrode}', exist_ok=True)
+
+    # 指标列表: (内部列名, 显示名称, 小数位数)
+    metrics_list = ['factor', 'method', 'num_sorter', 'num_well_detected', 'recall', 'precision', 'f1']
+    num_list = ['factor', 'num_sorter', 'num_well_detected']
+    other_list = ['recall', 'precision', 'f1']
+
+    # ---- 构建 pivot 表格: Factor | Method | Detected | Well-Detected | False Positive | Redundant | Overmerged | Bad | Recall | Precision | F1 ----
+    config_list = edf_raw['config'].dropna().unique()
+    for cfg_i in config_list:
+        df_cfg = edf_raw[edf_raw['config'] == cfg_i]  #  single_np_rd / ...
+        for sorter_name in sorted(df_cfg['sorter_name'].dropna().unique()):
+            rows = []
+            for factor in factors:
+                for method in METHODS:
+                    sub = df_cfg[(df_cfg['factor'] == factor) &
+                                (df_cfg['method'] == method) &
+                                (df_cfg['sorter_name'] == sorter_name)]
+                    rows.append(sub)
+                
+            df_out = pd.concat(rows, ignore_index=True)[metrics_list]
+            df_out[num_list] = df_out[num_list].astype(int)
+            df_out[other_list] = df_out[other_list].round(3)
+
+            csv_path = f'tables/{electrode}/{cfg_i}_{sorter_name}.csv'
+            df_out.to_csv(csv_path, index=False)
+            print(f'[Table Saved] {csv_path}')
+
+            # ---- LaTeX 三线表 ----
+            # generate_method_comparison_latex(df_out, electrode, cfg_i, sorter_name)
+
+            gt_val = edf_raw['num_gt'].iloc[0] if len(edf_raw) > 0 else 0
+            print(f'[Info] {ELECTRODE_LABELS.get(electrode, electrode)} GT = {int(gt_val)}')
 
 # ============================================================
 # 图 2: Normalization 效果 (多模型并排对比)
@@ -228,7 +317,7 @@ def plot_norm_effect(df, models=None, electrode='np128', save_path=None):
     dfs_by_model = {}
 
     for model in models:
-        edf = _collapse_configs(df_avg[(df_avg['electrode'] == electrode) & (df_avg['method'] == model)].copy())
+        edf = df_avg[(df_avg['electrode'] == electrode) & (df_avg['method'] == model)].copy()
         edf = _compute_metrics(edf)
         dfs_by_model[model] = edf
         if len(edf) > 0:
@@ -263,12 +352,20 @@ def plot_norm_effect(df, models=None, electrode='np128', save_path=None):
     x = np.arange(len(factors))
 
     for ci, (model, nm) in enumerate(combo_list):
+
+        cfg_name = None
         edf = dfs_by_model.get(model)
-        if edf is None or len(edf) == 0:
-            continue
-        ndf = edf[edf['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
-        if len(ndf) == 0:
-            continue
+        if electrode == 'np128' and nm == 'w/o Normalization':
+            cfg_name = 'single_np_rd'
+        elif electrode == 'np128' and nm == 'w/ Normalization':
+            cfg_name = 'single_np_rd_nm'
+        elif electrode == 'sq100' and nm == 'w/o Normalization':
+            cfg_name = 'single_sq_rd'
+        elif electrode == 'sq100' and nm == 'w/ Normalization':
+            cfg_name = 'single_sq_rd_nm'
+        edf_cfg = edf[edf['config'] == cfg_name]
+        
+        ndf = edf_cfg[edf_cfg['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
         offset = (ci - (n_groups - 1) / 2) * bar_width
         cfg = combo_configs[(model, nm)]
         ax1.bar(x + offset, ndf['num_well_detected'].values, bar_width,
@@ -279,7 +376,7 @@ def plot_norm_effect(df, models=None, electrode='np128', save_path=None):
     _add_factor_labels(ax1, factors)
     ax1.set_ylabel('Well-Detected Units')
     ax1.set_title(f'Well-Detected — {ELECTRODE_LABELS.get(electrode, electrode)}', fontsize=8)
-    ax1.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.02, 0.98), frameon=False)
+    ax1.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.0, 0.99), frameon=False)
     plt.tight_layout()
     if save_path:
         fig1.savefig(f'{base}_bar.{ext}', bbox_inches='tight')
@@ -287,25 +384,36 @@ def plot_norm_effect(df, models=None, electrode='np128', save_path=None):
     plt.close(fig1)
 
     # ---- Recall / Precision / F1 折线图 ----
-    for metric, ylbl in [('recall', 'Recall'), ('precision', 'Precision'), ('f1', 'F1')]:
+    # for metric, ylbl in [('recall', 'Recall'), ('precision', 'Precision'), ('f1', 'F1')]:
+    for metric, ylbl in [('f1', 'F1')]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
+
         for model in models:
-            edf = dfs_by_model.get(model)
-            if edf is None or len(edf) == 0:
-                continue
             for nm in norm_conditions:
-                ndf = edf[edf['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
-                if len(ndf) == 0:
-                    continue
+
+                cfg_name = None
+                edf = dfs_by_model.get(model)
+                if electrode == 'np128' and nm == 'w/o Normalization':
+                    cfg_name = 'single_np_rd'
+                elif electrode == 'np128' and nm == 'w/ Normalization':
+                    cfg_name = 'single_np_rd_nm'
+                elif electrode == 'sq100' and nm == 'w/o Normalization':
+                    cfg_name = 'single_sq_rd'
+                elif electrode == 'sq100' and nm == 'w/ Normalization':
+                    cfg_name = 'single_sq_rd_nm'
+                edf_cfg = edf[edf['config'] == cfg_name]
+
+                ndf = edf_cfg[edf_cfg['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
                 pos = [factors.index(f) for f in ndf['factor']]
                 cfg = combo_configs[(model, nm)]
                 ax.plot(pos, ndf[metric], marker=MODEL_MARKERS[model][nm], linestyle='-',
-                        linewidth=1, markersize=4, color=cfg['color'], label=cfg['label'])
+                        linewidth=1, markersize=2, color=cfg['color'], label=cfg['label'])
         _add_factor_labels(ax, factors)
         ax.set_ylabel(f'{ylbl} (%)')
         ax.set_ylim(0, 105)
         ax.set_title(f'{ylbl} — {ELECTRODE_LABELS.get(electrode, electrode)}', fontsize=8)
-        ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.02, 0.98), frameon=False)
+        # ax.legend(fontsize=8, loc='upper left', bbox_to_anchor=(0.02, 0.98), frameon=False)
+        ax.legend(fontsize=8, loc='lower left', bbox_to_anchor=(0.02, 0.02), frameon=False)
         plt.tight_layout()
         if save_path:
             fig.savefig(f'{base}_{metric}.{ext}', bbox_inches='tight')
@@ -328,7 +436,7 @@ def plot_efficiency_comparison(df, electrode='np128', save_path=None):
     包含 Kriging / Remove / EDSR(w/o & w/ Norm) / SpkRes(w/o & w/ Norm)
     """
     df_avg = get_avg_across_sorters(df)
-    edf = _collapse_configs(df_avg[df_avg['electrode'] == electrode].copy())
+    edf = df_avg[df_avg['electrode'] == electrode].copy()
     edf = _compute_metrics(edf)
     factors = _get_factors_desc(edf)
     spkres_nc = SPKRES_NORM_COLORS
@@ -353,7 +461,7 @@ def plot_efficiency_comparison(df, electrode='np128', save_path=None):
         base = save_path.rsplit('.', 1)[0]
         ext = save_path.rsplit('.', 1)[1] if '.' in save_path else 'tiff'
 
-    for metric_col, metric_label in [('recall', 'Recall'), ('precision', 'Precision'), ('f1', 'F1')]:
+    for metric_col, metric_label in [('f1', 'F1')]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
 
         for method in ['krig', 'remove']:
@@ -396,211 +504,6 @@ def plot_efficiency_comparison(df, electrode='np128', save_path=None):
 
 
 # ============================================================
-# 图 4: 综合摘要图
-# ============================================================
-
-def plot_summary_figure(df, electrode='np128', save_path=None):
-    """
-    综合摘要图 (2×3):
-      Top-Left:    四种方法 well-detected (w/o Norm.)
-      Top-Mid:     Recall 折线 (含 EDSR & SpkRes norm)
-      Top-Right:   Precision 折线 (含 EDSR & SpkRes norm)
-      Bottom-Left: EDSR Normalization 柱状对比
-      Bottom-Mid:  SpkRes Normalization Recall & Precision 折线
-      Bottom-Right: 图例 + 统计摘要
-    """
-    df_avg = get_avg_across_sorters(df)
-    edf = _collapse_configs(df_avg[df_avg['electrode'] == electrode].copy())
-    edf = _compute_metrics(edf)
-    factors = _get_factors_desc(edf)
-    spkres_nc = SPKRES_NORM_COLORS
-
-    fig = plt.figure(figsize=(10, 6.5))
-    gs = fig.add_gridspec(2, 3, hspace=0.42, wspace=0.35)
-
-    # Top-Left: 四种方法 well-detected (w/o Norm.)
-    ax1 = fig.add_subplot(gs[0, 0])
-    x = np.arange(len(factors))
-    bar_w = 0.20
-    ndf_no_norm = edf[edf['use_norm'] == 'w/o Normalization']
-    for mi, method in enumerate(METHODS):
-        subset = ndf_no_norm[ndf_no_norm['method'] == method].set_index('factor').reindex(factors).reset_index()
-        if len(subset) == 0:
-            continue
-        offset = (mi - 1.5) * bar_w
-        ax1.bar(x + offset, subset['num_well_detected'].values, bar_w,
-                color=METHOD_COLORS[method], edgecolor='black', linewidth=0.3,
-                label=METHOD_LABELS[method])
-    gt_val = edf['num_gt'].iloc[0]
-    _annotate_gt(ax1, gt_val)
-    _add_factor_labels(ax1, factors)
-    ax1.set_ylabel('Well-Detected')
-    ax1.set_title('Method Comparison (w/o Norm.)', fontsize=8)
-    ax1.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), frameon=False)
-
-    # Top-Mid: Recall 折线
-    ax2 = fig.add_subplot(gs[0, 1])
-    for method in ['krig', 'remove']:
-        ndf = edf[(edf['method'] == method) & (edf['use_norm'] == 'w/o Normalization')] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax2.plot(pos, ndf['recall'], 'o-', color=METHOD_COLORS[method],
-                     linewidth=1, markersize=2, label=METHOD_LABELS[method])
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf[(edf['method'] == 'edsr') & (edf['use_norm'] == nm)] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax2.plot(pos, ndf['recall'], marker='o' if ni == 0 else 's',
-                     linestyle='-' if ni == 0 else '--', color=EDSR_NORM_COLORS[nm],
-                     linewidth=1, markersize=2, label=f'EDSR {nm}')
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf[(edf['method'] == 'spkres') & (edf['use_norm'] == nm)] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax2.plot(pos, ndf['recall'], marker='D' if ni == 0 else '^',
-                     linestyle='-' if ni == 0 else '--', color=spkres_nc[nm],
-                     linewidth=1, markersize=2, label=f'SpkRes {nm}')
-    _add_factor_labels(ax2, factors)
-    ax2.set_ylabel('Recall (%)')
-    ax2.set_ylim(0, 105)
-    ax2.set_title('Recall', fontsize=8)
-    ax2.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), frameon=False)
-
-    # Top-Right: Precision 折线
-    ax3 = fig.add_subplot(gs[0, 2])
-    for method in ['krig', 'remove']:
-        ndf = edf[(edf['method'] == method) & (edf['use_norm'] == 'w/o Normalization')] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax3.plot(pos, ndf['precision'], 'o-', color=METHOD_COLORS[method],
-                     linewidth=1, markersize=2, label=METHOD_LABELS[method])
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf[(edf['method'] == 'edsr') & (edf['use_norm'] == nm)] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax3.plot(pos, ndf['precision'], marker='o' if ni == 0 else 's',
-                     linestyle='-' if ni == 0 else '--', color=EDSR_NORM_COLORS[nm],
-                     linewidth=1, markersize=2, label=f'EDSR {nm}')
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf[(edf['method'] == 'spkres') & (edf['use_norm'] == nm)] \
-              .set_index('factor').reindex(factors).reset_index()
-        if len(ndf) > 0:
-            pos = [factors.index(f) for f in ndf['factor']]
-            ax3.plot(pos, ndf['precision'], marker='D' if ni == 0 else '^',
-                     linestyle='-' if ni == 0 else '--', color=spkres_nc[nm],
-                     linewidth=1, markersize=2, label=f'SpkRes {nm}')
-    _add_factor_labels(ax3, factors)
-    ax3.set_ylabel('Precision (%)')
-    ax3.set_ylim(0, 105)
-    ax3.set_title('Precision', fontsize=8)
-    ax3.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), frameon=False)
-
-    # Bottom-Left: EDSR Normalization 柱状对比
-    ax4 = fig.add_subplot(gs[1, 0])
-    edf_edsr = edf[edf['method'] == 'edsr']
-    bar_w4 = 0.35
-    norm_hatches2 = {'w/o Normalization': '', 'w/ Normalization': '//'}
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf_edsr[edf_edsr['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
-        if len(ndf) == 0:
-            continue
-        offset = (ni - 0.5) * bar_w4
-        ax4.bar(x + offset, ndf['num_well_detected'].values, bar_w4,
-                color=EDSR_NORM_COLORS[nm], hatch=norm_hatches2[nm],
-                edgecolor='black', linewidth=0.3, label=f'EDSR {nm}')
-    _annotate_gt(ax4, gt_val)
-    _add_factor_labels(ax4, factors)
-    ax4.set_ylabel('Well-Detected')
-    ax4.set_title('EDSR: Normalization Effect', fontsize=8)
-    ax4.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), frameon=False)
-
-    # Bottom-Mid: SpkRes Recall + Precision
-    ax5 = fig.add_subplot(gs[1, 1])
-    edf_spkres = edf[edf['method'] == 'spkres']
-    for ni, nm in enumerate(['w/o Normalization', 'w/ Normalization']):
-        ndf = edf_spkres[edf_spkres['use_norm'] == nm].set_index('factor').reindex(factors).reset_index()
-        if len(ndf) == 0:
-            continue
-        pos = [factors.index(f) for f in ndf['factor']]
-        c = spkres_nc[nm]
-        mk = 'D' if ni == 0 else '^'
-        ax5.plot(pos, ndf['recall'], marker=mk, linestyle='-', color=c,
-                 linewidth=1, markersize=3, label=f'SpkRes {nm} Recall')
-        ax5.plot(pos, ndf['precision'], marker=mk, linestyle=':', color=c,
-                 linewidth=1, markersize=3, markerfacecolor='white',
-                 label=f'SpkRes {nm} Prec.')
-    _add_factor_labels(ax5, factors)
-    ax5.set_ylabel('Percentage (%)')
-    ax5.set_ylim(0, 105)
-    ax5.set_title('SpkRes: Recall & Precision', fontsize=8)
-    ax5.legend(fontsize=8, loc='upper left', bbox_to_anchor=(1.02, 1), frameon=False)
-
-    # Bottom-Right: Legend + Summary
-    ax6 = fig.add_subplot(gs[1, 2])
-    ax6.axis('off')
-
-    y_start = 0.98
-    ax6.text(0.05, y_start, 'Methods:', fontsize=8, fontweight='bold', va='top')
-    for mi, method in enumerate(METHODS):
-        ax6.add_patch(plt.Rectangle((0.05, y_start - 0.17 - mi * 0.08), 0.06, 0.04,
-                                     color=METHOD_COLORS[method], transform=ax6.transAxes))
-        ax6.text(0.13, y_start - 0.15 - mi * 0.08, METHOD_LABELS[method], fontsize=8,
-                 va='center', transform=ax6.transAxes)
-
-    ax6.text(0.50, y_start, 'Norm. legend:', fontsize=8, fontweight='bold', va='top')
-    ax6.add_patch(plt.Rectangle((0.50, y_start - 0.17), 0.06, 0.04,
-                                 color=EDSR_NORM_COLORS['w/o Normalization'], transform=ax6.transAxes))
-    ax6.text(0.58, y_start - 0.15, 'EDSR w/o Norm.', fontsize=8, va='center', transform=ax6.transAxes)
-    ax6.add_patch(plt.Rectangle((0.50, y_start - 0.25), 0.06, 0.04,
-                                 facecolor=EDSR_NORM_COLORS['w/ Normalization'], hatch='//',
-                                 edgecolor='black', linewidth=0.3, transform=ax6.transAxes))
-    ax6.text(0.58, y_start - 0.23, 'EDSR w/ Norm.', fontsize=8, va='center', transform=ax6.transAxes)
-    ax6.add_patch(plt.Rectangle((0.50, y_start - 0.33), 0.06, 0.04,
-                                 facecolor=spkres_nc['w/o Normalization'], transform=ax6.transAxes))
-    ax6.text(0.58, y_start - 0.31, 'SpkRes w/o Norm.', fontsize=8, va='center', transform=ax6.transAxes)
-    ax6.add_patch(plt.Rectangle((0.50, y_start - 0.41), 0.06, 0.04,
-                                 facecolor=spkres_nc['w/ Normalization'], transform=ax6.transAxes))
-    ax6.text(0.58, y_start - 0.39, 'SpkRes w/ Norm.', fontsize=8, va='center', transform=ax6.transAxes)
-    ax6.text(0.50, y_start - 0.52, 'Line: — Recall  .... Precision', fontsize=8, va='top', color='gray')
-
-    ax6.text(0.05, 0.42, 'Mean across factors:', fontsize=8, fontweight='bold', va='top')
-    y = 0.37
-    for method in ['krig', 'remove']:
-        vals_r = edf[(edf['method'] == method) & (edf['use_norm'] == 'w/o Normalization')]['recall']
-        vals_p = edf[(edf['method'] == method) & (edf['use_norm'] == 'w/o Normalization')]['precision']
-        if len(vals_r) > 0:
-            ax6.text(0.08, y, f'{METHOD_LABELS[method]}: R={vals_r.mean():.1f}%, P={vals_p.mean():.1f}%',
-                     fontsize=8, va='top', color=METHOD_COLORS[method])
-            y -= 0.04
-    for nm in ['w/o Normalization', 'w/ Normalization']:
-        vals_r = edf[(edf['method'] == 'edsr') & (edf['use_norm'] == nm)]['recall']
-        vals_p = edf[(edf['method'] == 'edsr') & (edf['use_norm'] == nm)]['precision']
-        if len(vals_r) > 0:
-            ax6.text(0.08, y, f'EDSR ({nm}): R={vals_r.mean():.1f}%, P={vals_p.mean():.1f}%',
-                     fontsize=8, va='top', color=EDSR_NORM_COLORS[nm])
-            y -= 0.04
-    for nm in ['w/o Normalization', 'w/ Normalization']:
-        vals_r = edf[(edf['method'] == 'spkres') & (edf['use_norm'] == nm)]['recall']
-        vals_p = edf[(edf['method'] == 'spkres') & (edf['use_norm'] == nm)]['precision']
-        if len(vals_r) > 0:
-            ax6.text(0.08, y, f'SpkRes ({nm}): R={vals_r.mean():.1f}%, P={vals_p.mean():.1f}%',
-                     fontsize=8, va='top', color=spkres_nc[nm])
-            y -= 0.04
-
-    plt.suptitle(f'Spike Sorting Evaluation — {ELECTRODE_LABELS.get(electrode, electrode)}',
-                 fontsize=8, y=1.01)
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        print(f'[Saved] {save_path}')
-    plt.close()
-
-
-# ============================================================
 # 图 5: Zero-shot vs Few-shot 迁移对比 (sq100 目标域)
 # ============================================================
 
@@ -611,17 +514,18 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
     records = []
     pairings = [
         # Baselines
-        ('single_sq100_rd_nm', 'krig', 'Kriging'),
-        ('single_sq100_rd_nm', 'remove', 'Remove'),
+        ('single_sq_rd_nm', 'krig', 'Kriging'),
+        ('single_sq_rd_nm', 'remove', 'Remove'),
         # EDSR transfer
-        ('zs_sq100_rd_nm', 'edsr', 'Zero-shot'),
-        ('zs_sq100_rd_nm_gcl', 'edsr', 'Zero-shot (GCL)'),
-        ('fs_sq_rd_nm_p1_5', 'edsr', 'Few-shot'),
+        ('zs_sq_rd_nm', 'edsr', 'Zero-shot (EDSR)'),
+        ('zs_sq_rd_nm_gcl', 'edsr', 'Zero-shot GCL (EDSR)'),
+        ('fs_sq_rd_nm_p1_5', 'edsr', 'Few-shot (EDSR)'),
         # SpkRes transfer
         ('zs_sq_rd_nm', 'spkres', 'Zero-shot (SpkRes)'),
-        ('zs_sq_rd_nm_zero_shot_gcl', 'spkres', 'Zero-shot GCL (SpkRes)'),
+        ('zs_sq_rd_nm_gcl', 'spkres', 'Zero-shot GCL (SpkRes)'),
         ('fs_sq_rd_nm_p1_5', 'spkres', 'Few-shot (SpkRes)'),
     ]
+
     for cfg, method, label in pairings:
         sub = df_all[(df_all['config'] == cfg) & (df_all['method'] == method)].copy()
         sub['display'] = label
@@ -638,24 +542,24 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
     display_colors = {
         'Kriging':              CLR['krig'],
         'Remove':               CLR['remove'],
-        'Zero-shot':            '#A0C8E0',
-        'Zero-shot (GCL)':      '#7EC8B8',
-        'Few-shot':             CLR['edsr'],
+        'Zero-shot (EDSR)':     '#A0C8E0',
+        'Zero-shot GCL (EDSR)': '#7EC8B8',
+        'Few-shot (EDSR)':      CLR['edsr'],
         'Zero-shot (SpkRes)':   '#D4A0A0',
         'Zero-shot GCL (SpkRes)': '#C08080',
         'Few-shot (SpkRes)':    CLR['spkres'],
     }
     display_markers = {
         'Kriging':              'o', 'Remove': 's',
-        'Zero-shot':            'D', 'Zero-shot (GCL)': 'v', 'Few-shot': '^',
+        'Zero-shot (EDSR)':            'D', 'Zero-shot GCL (EDSR)': 'v', 'Few-shot (EDSR)': '^',
         'Zero-shot (SpkRes)':   '<', 'Zero-shot GCL (SpkRes)': '>', 'Few-shot (SpkRes)': 'P',
     }
     is_transfer = {
         'Kriging': False, 'Remove': False,
-        'Zero-shot': True, 'Zero-shot (GCL)': True, 'Few-shot': True,
+        'Zero-shot (EDSR)': True, 'Zero-shot GCL (EDSR)': True, 'Few-shot (EDSR)': True,
         'Zero-shot (SpkRes)': True, 'Zero-shot GCL (SpkRes)': True, 'Few-shot (SpkRes)': True,
     }
-    edsr_displays = ['Zero-shot', 'Zero-shot (GCL)', 'Few-shot']
+    edsr_displays = ['Zero-shot (EDSR)', 'Zero-shot GCL (EDSR)', 'Few-shot (EDSR)']
     spkres_displays = ['Zero-shot (SpkRes)', 'Zero-shot GCL (SpkRes)', 'Few-shot (SpkRes)']
 
     factors = _get_factors_desc(edf)
@@ -681,7 +585,7 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
     _add_factor_labels(ax1, factors)
     ax1.set_ylabel('Well-Detected Units')
     ax1.set_title('Well-Detected (SqMEA)', fontsize=8)
-    ax1.legend(fontsize=8, loc='upper left', frameon=False, bbox_to_anchor=(0, 0.9))
+    ax1.legend(fontsize=8, loc='upper left', frameon=False, bbox_to_anchor=(0, 0.98))
     plt.tight_layout()
     if save_path:
         fig1.savefig(f'{base}_bar.{ext}', bbox_inches='tight')
@@ -698,12 +602,12 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
             pos = [factors.index(f) for f in ndf['factor']]
             ax.plot(pos, ndf[metric_col], marker=display_markers[d],
                     linestyle='--' if not is_transfer[d] else '-',
-                    color=display_colors[d], linewidth=1, markersize=4, label=d)
+                    color=display_colors[d], linewidth=1, markersize=2, label=d)
         _add_factor_labels(ax, factors)
         ax.set_ylabel(f'{metric_label} (%)')
         ax.set_ylim(0, 105)
         ax.set_title(f'{metric_label} (SqMEA)', fontsize=8)
-        ax.legend(fontsize=8, loc='upper left', frameon=False)
+        ax.legend(fontsize=8, loc='upper left', frameon=False,ncol=2)
         plt.tight_layout()
         if save_path:
             fig.savefig(f'{base}_{metric_col}.{ext}', bbox_inches='tight')
@@ -711,7 +615,7 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
         plt.close(fig)
 
     # --- Fig 5e–5g: EDSR Transfer zoom ---
-    for metric_col, metric_label in [('recall', 'Recall'), ('precision', 'Precision'), ('f1', 'F1')]:
+    for metric_col, metric_label in [('f1', 'F1')]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
         for d in edsr_displays:
             ndf = edf[edf['display'] == d].set_index('factor').reindex(factors).reset_index()
@@ -719,7 +623,7 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
                 continue
             pos = [factors.index(f) for f in ndf['factor']]
             ax.plot(pos, ndf[metric_col], marker=display_markers[d], linestyle='-',
-                    color=display_colors[d], linewidth=1, markersize=4, label=d)
+                    color=display_colors[d], linewidth=1, markersize=2, label=d)
         _add_factor_labels(ax, factors)
         ax.set_ylabel(f'{metric_label} (%)')
         ax.set_ylim(0, 105)
@@ -732,7 +636,7 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
         plt.close(fig)
 
     # --- Fig 5h–5j: SpkRes Transfer zoom ---
-    for metric_col, metric_label in [('recall', 'Recall'), ('precision', 'Precision'), ('f1', 'F1')]:
+    for metric_col, metric_label in [('f1', 'F1')]:
         fig, ax = plt.subplots(1, 1, figsize=(4, 3))
         for d in spkres_displays:
             ndf = edf[edf['display'] == d].set_index('factor').reindex(factors).reset_index()
@@ -740,7 +644,7 @@ def plot_zero_shot_vs_few_shot(df_all, save_path=None):
                 continue
             pos = [factors.index(f) for f in ndf['factor']]
             ax.plot(pos, ndf[metric_col], marker=display_markers[d], linestyle='-',
-                    color=display_colors[d], linewidth=1, markersize=4, label=d)
+                    color=display_colors[d], linewidth=1, markersize=2, label=d)
         _add_factor_labels(ax, factors)
         ax.set_ylabel(f'{metric_label} (%)')
         ax.set_ylim(0, 105)
@@ -789,9 +693,9 @@ def plot_catastrophic_forgetting(df_all, save_path=None):
     """
     records = []
     pairings = [
-        ('single_np128_rd_nm', 'krig', 'Kriging'),
-        ('single_np128_rd_nm', 'remove', 'Remove'),
-        ('single_np128_rd_nm', 'edsr', 'EDSR'),
+        ('single_np_rd_nm', 'krig', 'Kriging'),
+        ('single_np_rd_nm', 'remove', 'Remove'),
+        ('single_np_rd_nm', 'edsr', 'EDSR'),
         ('rec_np_rd_nm_p1_5', 'edsr', 'EDSR (Fine-tuned)'),
         # SpkRes
         ('single_np_rd_nm', 'spkres', 'SpkRes'),
@@ -854,7 +758,7 @@ def plot_catastrophic_forgetting(df_all, save_path=None):
     _add_factor_labels(ax1, factors)
     ax1.set_ylabel('Well-Detected Units')
     ax1.set_title('Well-Detected (NP128)', fontsize=8)
-    ax1.legend(fontsize=8, loc='upper left', frameon=False, labelspacing=0.15, bbox_to_anchor=(0, 0.99))
+    ax1.legend(fontsize=8, loc='upper left', frameon=False, labelspacing=0.15, bbox_to_anchor=(0, 0.99), ncol=2)
     plt.tight_layout()
     if save_path:
         fig1.savefig(f'{base}_bar.{ext}', bbox_inches='tight')
@@ -871,7 +775,7 @@ def plot_catastrophic_forgetting(df_all, save_path=None):
             pos = [factors.index(f) for f in ndf['factor']]
             ax.plot(pos, ndf[metric], marker=display_markers[d],
                     linestyle='--' if is_fine_tuned[d] else '-',
-                    color=display_colors[d], linewidth=1, markersize=4, label=d)
+                    color=display_colors[d], linewidth=1, markersize=2, label=d)
         _add_factor_labels(ax, factors)
         ax.set_ylabel(f'{ylabel} (%)')
         ax.set_ylim(0, 105)
@@ -977,28 +881,22 @@ def main():
 
         # 图1: 四种方法 fair comparison (均 w/o Normalization)
         plot_method_comparison(df_rd, electrode=electrode,
-            save_path=os.path.join(output_dir, f'1_method_comparison_{electrode}.png'))
+            save_path=os.path.join(output_dir, f'1_method_comparison_{electrode}.tiff'))
 
         # 图2: Normalization 对 EDSR & SpkRes 的效果 (并排对比)
         plot_norm_effect(df_rd, electrode=electrode,
-            save_path=os.path.join(output_dir, f'2_norm_effect_{electrode}.png'))
+            save_path=os.path.join(output_dir, f'2_norm_effect_{electrode}.tiff'))
 
-        # 图3: Recall & Precision (含 EDSR & SpkRes norm)
-        plot_efficiency_comparison(df_rd, electrode=electrode,
-            save_path=os.path.join(output_dir, f'3_recall_precision_{electrode}.png'))
-
-        # 图4: 综合摘要 (2×3)
-        plot_summary_figure(df_rd, electrode=electrode,
-            save_path=os.path.join(output_dir, f'4_summary_{electrode}.png'))
+        # # 图3: Recall & Precision (含 EDSR & SpkRes norm)
+        # plot_efficiency_comparison(df_rd, electrode=electrode,
+        #     save_path=os.path.join(output_dir, f'3_recall_precision_{electrode}.png'))
 
     # 迁移学习分析
     print("\n--- Zero-shot vs Few-shot Transfer ---")
-    plot_zero_shot_vs_few_shot(df_all,
-        save_path=os.path.join(output_dir, '5_zero_shot_vs_few_shot.png'))
+    plot_zero_shot_vs_few_shot(df_all, save_path=os.path.join(output_dir, '5_zero_shot_vs_few_shot.tiff'))
 
     print("\n--- Catastrophic Forgetting ---")
-    plot_catastrophic_forgetting(df_all,
-        save_path=os.path.join(output_dir, '6_catastrophic_forgetting.png'))
+    plot_catastrophic_forgetting(df_all, save_path=os.path.join(output_dir, '6_catastrophic_forgetting.tiff'))
 
     print("\n" + "=" * 60)
     print(f"All figures saved to: {output_dir}/")

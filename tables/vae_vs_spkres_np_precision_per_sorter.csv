@@ -1,0 +1,9 @@
+Factor,Sorter,VAE,SpkRes
+16,herdingspikes,0.734,0.742
+16,mountainsort5,0.741,0.705
+8,herdingspikes,0.758,0.667
+8,mountainsort5,0.69,0.763
+4,herdingspikes,0.625,0.691
+4,mountainsort5,0.691,0.8
+2,herdingspikes,0.661,0.558
+2,mountainsort5,0.532,0.783
