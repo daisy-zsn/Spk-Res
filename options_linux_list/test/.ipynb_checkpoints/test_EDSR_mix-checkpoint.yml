@@ -1,0 +1,126 @@
+name: EDSR
+model_type: ReconstructionModel
+scale: 1
+num_gpu: 1
+manual_seed: 100
+settings:
+  factor: 16
+  is_intp: true
+  is_krig: true
+  is_random: false
+  slide_window: 0
+  train_prop: 1.5
+  test_prop: 15
+  rec_path: ../recordings_60cells_Neuropixels-128_30.0_10.0uV.h5
+  save_path: ../generate_traces_for_train/mix
+  is_whole: true
+  recon_method: edsr
+  base_loss_path: loss_dict
+  channel_num: 128
+  mixture:
+    m1_path: ../recordings_50cells_SqMEA-10-15_30.0_10.0uV.h5
+    m2_path: ../recordings_60cells_Neuropixels-128_30.0_10.0uV.h5
+datasets:
+  train:
+    name: TrainSet
+    type: Dataset_Reconstruction
+    sigma_type: random
+    sigma_range:
+    - 0
+    - 50
+    in_ch: 1
+    dataroot_gt: ../generate_traces_for_train/mix/generate_krig_traces_factor_16/train
+    dataroot_lq: none
+    geometric_augs: false
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+    use_shuffle: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 8
+    mini_batch_sizes:
+    - 8
+    iters:
+    - 300000
+    gt_size: 128
+    gt_sizes:
+    - 128
+    dataset_enlarge_ratio: 1
+    prefetch_mode: cuda
+    pin_memory: true
+  val:
+    name: ValSet
+    type: Dataset_Reconstruction
+    sigma_test: 25
+    in_ch: 1
+    dataroot_gt: ../generate_traces_for_train/mix/generate_krig_traces_factor_16/test
+    dataroot_lq: none
+    io_backend:
+      type: disk
+network_g:
+  type: EDSR
+  num_channels: 1
+  factor: 1
+  width: 64
+  depth: 16
+  kernel_size: 3
+path:
+  pretrain_network_g: null
+  strict_load_g: true
+  resume_state: null
+train:
+  total_iter: 300000
+  warmup_iter: -1
+  use_grad_clip: true
+  scheduler:
+    type: CosineAnnealingRestartCyclicLR
+    periods:
+    - 92000
+    - 208000
+    restart_weights:
+    - 1
+    - 1
+    eta_mins:
+    - 0.0003
+    - 1.0e-06
+  mixing_augs:
+    mixup: true
+    mixup_beta: 1.2
+    use_identity: true
+  optim_g:
+    type: AdamW
+    lr: 0.0003
+    weight_decay: 0.0001
+    betas:
+    - 0.9
+    - 0.999
+  pixel_opt:
+    type: MSELoss
+    loss_weight: 1
+    reduction: mean
+  early_stop:
+    enabled: true
+    metric: MSELoss
+    mode: min
+    patience: 6
+    min_delta: 0.0001
+val:
+  window_size: 8
+  val_freq: 1000.0
+  save_img: false
+  rgb2bgr: false
+  use_image: false
+  max_minibatch: 8
+  metrics:
+    mse:
+      type: calculate_mse
+logger:
+  print_freq: 1000
+  save_checkpoint_freq: 8000.0
+  use_tb_logger: true
+  wandb:
+    project: null
+    resume_id: null
+dist_params:
+  backend: nccl
+  port: 29500

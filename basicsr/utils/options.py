@@ -62,14 +62,21 @@ def parse(opt_path, is_train=True):
             opt['path'][key] = osp.expanduser(val)
     opt['path']['root'] = osp.abspath(osp.join(__file__, osp.pardir, osp.pardir, osp.pardir))
     if is_train:
+<<<<<<< HEAD
         experiments_root = osp.join(opt['path']['root'], 'experiments',opt['name'])
+=======
+        experiments_root = osp.join(opt['path']['root'], 'experiments', opt['name'], opt['exp_name'], 'factor_{}'.format(opt['settings']['factor']))
+>>>>>>> master
         opt['path']['experiments_root'] = experiments_root
         opt['path']['models'] = osp.join(experiments_root, 'models')
         opt['path']['training_states'] = osp.join(experiments_root, 'training_states')
         opt['path']['log'] = experiments_root
         opt['path']['visualization'] = osp.join(experiments_root,'visualization')
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> master
         # change some options for debug mode
         if 'debug' in opt['name']:
             if 'val' in opt:

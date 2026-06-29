@@ -6,10 +6,17 @@ def main(opt_path=None):
    generate = Generate(opt_path)
 
    # 1. generate training data
+<<<<<<< HEAD
    # generate.generate_train_list()
 
    # 2. train model
    generate.generate_train_weights()
+=======
+   generate.generate_train_list()
+
+   # 2. train model
+   # generate.generate_train_weights()
+>>>>>>> master
 
    # 3. restored recordings (and calculate MSE/NRMSE)
    # restored_file = '../{}_{}.nwb'.format(generate.method,generate.factor)
@@ -22,4 +29,8 @@ def main(opt_path=None):
 
 if __name__ == '__main__':
    opt_path = 'options_linux/sim250/Reconstrcution_Restormer.yml'
+<<<<<<< HEAD
+=======
+   # opt_path = 'options_linux/test_EDSR.yml'
+>>>>>>> master
    main(opt_path=opt_path)

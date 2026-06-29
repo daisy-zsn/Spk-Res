@@ -1,0 +1,9 @@
+Factor,Sorter,baseline,direct_transfer,l2,llr,ewc,kd
+16,herdingspikes,0.767,0.8,0.8,0.8,0.767,0.8
+16,mountainsort5,0.717,0.667,0.717,0.667,0.717,0.717
+8,herdingspikes,0.8,0.8,0.85,0.833,0.767,0.85
+8,mountainsort5,0.75,0.65,0.683,0.7,0.75,0.767
+4,herdingspikes,0.783,0.633,0.633,0.667,0.783,0.7
+4,mountainsort5,0.867,0.617,0.65,0.733,0.85,0.8
+2,herdingspikes,0.717,0.417,0.467,0.65,0.733,0.75
+2,mountainsort5,0.9,0.6,0.75,0.8,0.917,0.933

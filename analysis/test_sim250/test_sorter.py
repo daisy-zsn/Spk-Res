@@ -17,7 +17,7 @@ def main():
         datasets,cases = {},{}
         for method in method_list:
             print(method)
-            if intp_way == "prt": # partial 部分插值，保留没有损坏的时刻
+            if intp_way == "prt": # partial 
                 file = "/root/autodl-tmp/{}_resfile.nwb".format(method)
                 rec, sorting = si.read_nwb(file, load_recording=True, load_sorting=True)
             else: # whole 全部插值，不保留没有损坏的时刻
