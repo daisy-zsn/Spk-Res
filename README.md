@@ -1,4 +1,4 @@
-# Spk-Res (Coming soon)
+# Spk-Res
 ## Install
 You can create the environment using a yml file:
 ```
