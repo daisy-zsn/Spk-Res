@@ -131,7 +131,6 @@ class Generate:
                 self.lq_std_chl = np.std(lq_input, axis=0)
                 np.save(os.path.join(self.norm_path,'lq_factor_{}.npy'.format(self.factor)),[self.lq_mean_chl, self.lq_mean_chl])
  
-
         # 8. input rec / save path
         if self.is_intp:
             if self.is_krig:  # kriging interpolation

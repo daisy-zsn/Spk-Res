@@ -1,0 +1,31 @@
+weights/
+weights_spkres/
+.ipynb_checkpoints/
+
+# # 编译输出
+# *.class
+# *.o
+# *.exe
+
+# # 依赖目录
+# node_modules/
+# vendor/
+
+# # IDE 配置（不同团队可能统一使用）
+# .vscode/
+# .idea/
+# *.iml
+
+# # 环境变量文件
+# .env
+# .env.local
+
+# # 日志
+# logs/
+# *.log
+
+# # 临时文件
+# *.tmp
+# *.swp
+# .DS_Store
+

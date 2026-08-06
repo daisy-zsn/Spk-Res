@@ -1,0 +1,145 @@
+# general settings
+name: EDSR
+exp_name: demo
+model_type: ReconstructionModel
+scale: 1
+num_gpu: 1  # set num_gpu: 0 for cpu mode
+manual_seed: 100
+
+# generate settings
+settings:
+  factor: 16
+  is_intp: true # false: upsample (LR size)
+  is_krig: true # true
+  is_random: false
+  slide_window: 0
+  train_prop: 300 
+  test_prop: 3000
+  rec_path: ../sub-MEAREC-250neuron-Neuropixels_ecephys.nwb
+  save_path: ../generate_traces_for_train/sim250
+  weights_path: /root/autodl-tmp/Spk-Res/weights/demo.pth
+  is_whole: True # pattern: whole (True) / partial (False)
+  recon_method: edsr
+  base_loss_path: loss_dict
+  mode: min
+  min_delta: 0.0001
+
+# dataset and data loader settings
+datasets:
+  train:
+    name: TrainSet
+    type: Dataset_Reconstruction
+    sigma_type: random
+    sigma_range: [0,50]
+    in_ch: 1    ## Grayscale image
+    dataroot_gt: ../generate_traces_for_train/sim250/generate_krig_traces_factor_16/train
+    dataroot_lq: none
+    geometric_augs: False
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+
+    # data loader
+    use_shuffle: true
+    num_worker_per_gpu: 1
+    batch_size_per_gpu: 1 # 每个gpu的batch size
+
+    ### ------- Training on single fixed-patch size 128x128---------
+    mini_batch_sizes: [1]
+    iters: [300000]
+    gt_size: 384
+    gt_sizes: [384]
+    ### ------------------------------------------------------------
+
+    dataset_enlarge_ratio: 1
+    prefetch_mode: cuda
+    pin_memory: True
+
+  val:
+    name: ValSet
+    type: Dataset_Reconstruction
+    sigma_test: 25
+    in_ch: 1  ## Grayscale image
+    dataroot_gt: ../generate_traces_for_train/sim250/generate_krig_traces_factor_16/test
+    dataroot_lq: none
+    io_backend:
+      type: disk
+
+
+# network structures
+network_g:
+  type: EDSR
+  num_channels: 1
+  factor: 1
+  width: 64
+  depth: 16
+  kernel_size: 3
+
+# path
+path:
+  pretrain_network_g: ~
+  strict_load_g: true
+  resume_state: ~
+
+# training settings
+train:
+  total_iter: 3000
+  warmup_iter: -1 # no warm up
+  use_grad_clip: true
+
+  # Split 300k iterations into two cycles.
+  # 1st cycle: fixed 3e-4 LR for 92k iters.
+  # 2nd cycle: cosine annealing (3e-4 to 1e-6) for 208k iters.
+  scheduler:
+    type: CosineAnnealingRestartCyclicLR
+    periods: [92000, 208000]
+    restart_weights: [1,1]
+    eta_mins: [0.0003,0.000001]
+
+  mixing_augs:
+    mixup: true
+    mixup_beta: 1.2
+    use_identity: true
+
+  optim_g:
+    type: AdamW
+    lr: !!float 3e-4
+    weight_decay: !!float 1e-4
+    betas: [0.9, 0.999]
+
+  # losses
+  pixel_opt:
+    type: MSELoss # L1Loss
+    loss_weight: 1
+    reduction: mean
+
+# validation settings
+val:
+  window_size: 8
+  val_freq: !!float 1e2
+  save_img: false
+  rgb2bgr: false
+  use_image: false
+  max_minibatch: 8
+
+  metrics:
+#    psnr: # metric name, can be arbitrary
+#      type: calculate_psnr
+#      crop_border: 0
+#      test_y_channel: false
+    mse:
+      type: calculate_mse
+
+# logging settings
+logger:
+  print_freq: 100
+  save_checkpoint_freq: !!float 1e2
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500

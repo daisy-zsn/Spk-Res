@@ -159,17 +159,18 @@ def train_model(opt_path=None):
     opt = read_options(opt_path=opt_path, is_train=True)
     weight_path = opt.get('settings', {}).get('weights_path')
     initialized_logger = {}
+    best_metric = None # init metric
+    metric_name = opt['train']['pixel_opt']['type']
+    no_improve_count = 0
+    mode = opt.get('settings', {}).get('mode', None)
+    min_delta = opt.get('settings', {}).get('min_delta', None)
 
     # ---------- Early stopping initialization ----------
     early_stop_cfg = opt.get('train', {}).get('early_stop', None)
     if early_stop_cfg is not None and early_stop_cfg.get('enabled', False):
-        metric_name = early_stop_cfg.get('metric', 'MSELoss')
         mode = early_stop_cfg.get('mode', 'min')
         patience = early_stop_cfg.get('patience', 10)
-        min_delta = early_stop_cfg.get('min_delta', 0.0)
-
-        best_metric = None
-        no_improve_count = 0
+        min_delta = early_stop_cfg.get('min_delta', 0.0)        
     else:
         early_stop_cfg = None
 
@@ -212,10 +213,11 @@ def train_model(opt_path=None):
     logger, tb_logger = init_loggers(opt)
 
     # early stop loggers
-    logger.info(
-            f'Early stopping enabled: '
-            f'metric={metric_name}, mode={mode}, '
-            f'patience={patience}, min_delta={min_delta}.')
+    if early_stop_cfg is not None and early_stop_cfg.get('enabled', False):
+        logger.info(
+                f'Early stopping enabled: '
+                f'metric={metric_name}, mode={mode}, '
+                f'patience={patience}, min_delta={min_delta}.')
 
     # create train and validation dataloaders
     result = create_train_val_dataloader(opt, logger)
@@ -338,42 +340,42 @@ def train_model(opt_path=None):
                 current_metric = model.validation(val_loader, current_iter, tb_logger)
                 print(str(current_iter)+": "+str(current_metric))
 
-                # early stop
-                if early_stop_cfg is not None:
-                    val_value = current_metric.item()  
-                    if val_value is not None:
-                        if best_metric is None:
-                            best_metric = val_value
-                            is_improved = True
-                        else:
-                            if mode == 'max':
-                                is_improved = (val_value - best_metric) > min_delta
-                            else:  # 'min'
-                                is_improved = (best_metric - val_value) > min_delta
+                val_value = current_metric.item()  
+                if val_value is not None:
+                    if best_metric is None:
+                        best_metric = val_value
+                        is_improved = True
+                    else:
+                        if mode == 'max':
+                            is_improved = (val_value - best_metric) > min_delta
+                        else:  # 'min'
+                            is_improved = (best_metric - val_value) > min_delta
 
-                        if is_improved:
-                            best_metric = val_value
-                            no_improve_count = 0
+                    if is_improved:
+                        best_metric = val_value
+                        no_improve_count = 0
 
-                            # 存储成best model
-                            if weight_path is not None:
-                                model.save_best_weights(weight_path)
-                                
-                            logger.info(
+                        # 存储成best model
+                        if weight_path is not None:
+                            model.save_best_weights(weight_path)
+
+                        logger.info(
                                 f'Iter {current_iter}: {metric_name} improved to {val_value:.8f}, '
                                 f'best {metric_name}: {best_metric:.8f}.')
-                        else:
-                            no_improve_count += 1
-                            logger.info(
-                                f'Iter {current_iter}: {metric_name} = {val_value:.8f}, '
-                                f'no improvement for {no_improve_count} validations '
-                                f'(patience {patience}).')
+                # early stop
+                if early_stop_cfg is not None:
+                    if not is_improved:
+                        no_improve_count += 1
+                        logger.info(
+                            f'Iter {current_iter}: {metric_name} = {val_value:.8f}, '
+                            f'no improvement for {no_improve_count} validations '
+                            f'(patience {patience}).')
 
-                        if no_improve_count >= patience:
-                            logger.info(
-                                f'Early stopping triggered at iter {current_iter} '
-                                f'(best {metric_name}: {best_metric:.8f}).')
-                            break  
+                    if no_improve_count >= patience:
+                        logger.info(
+                            f'Early stopping triggered at iter {current_iter} '
+                            f'(best {metric_name}: {best_metric:.8f}).')
+                        break  
 
             data_time = time.time()
             iter_time = time.time()

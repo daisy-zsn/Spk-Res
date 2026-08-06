@@ -78,7 +78,6 @@ def run_sim_sorter(origin_file=None, opt_path = None, sorter_list = None, method
     print(run_times)
     print(study.cases.keys())
 
-    
 
 if __name__ == '__main__':
 

@@ -15,7 +15,7 @@ def main(opt_path = None, electrode = None, sorter_fold = None, mode='few_shot',
    generate.generate_train_weights()
 
    # 3. restored recordings (and calculate MSE/NRMSE)
-   restored_file = '../{}_res.h5'.format(electrode) 
+   restored_file = '../{}_res.h5'.format(electrode)
    generate.generate_recon_h5file(restored_file, mode=mode)
 
    # 4.evaluate: spike sorter / hit rate

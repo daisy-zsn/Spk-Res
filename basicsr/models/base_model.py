@@ -260,6 +260,11 @@ class BaseModel():
                 state_dict[key] = param.cpu()
             save_dict[param_key_] = state_dict
 
+        weights_dir = os.path.dirname(weights_path)
+        if not os.path.exists(weights_dir):
+            warning_msg = f'Weights directory {weights_dir} does not exist. Creating directory.'
+            logger.warning(warning_msg)
+            os.makedirs(weights_dir)
         torch.save(save_dict, weights_path)
 
 

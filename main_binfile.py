@@ -1,4 +1,4 @@
-from utils.generate_utils import Generate
+from res_utils.generate_utils import Generate
 
 
 def main(opt_path=None):

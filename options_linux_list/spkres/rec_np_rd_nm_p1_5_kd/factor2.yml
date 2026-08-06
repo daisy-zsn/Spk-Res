@@ -19,7 +19,7 @@ settings:
   save_path: ../generate_traces_for_train/np_nm
   chl_path: ../bad_chls/np
   norm_path: ../zscore_info/np
-  weights_path: /root/autodl-tmp/Spk-Res/weights_spkres/factor_2/fs_sq100_rd_nm_p1_5_kd.pth
+  weights_path: /root/autodl-tmp/weights_spkres/factor_2/fs_sq100_rd_nm_p1_5_kd.pth # weights path: /root/autodl-tmp/Spk-Res/weights_spkres/factor_2/fs_sq100_rd_nm_p1_5_kd.pth
   is_whole: True
   recon_method: spkres
   base_loss_path: loss_dict
