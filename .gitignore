@@ -1,6 +1,12 @@
 weights/
 weights_spkres/
 .ipynb_checkpoints/
+loss_dict/
+.vscode/
+main_binfile.py
+main_meafile.py
+main_nwbfile.py
+
 
 # # 编译输出
 # *.class
