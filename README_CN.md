@@ -16,8 +16,8 @@
 
 | 数据集 | 用途 | 来源 |
 | --- | --- | --- |
-| Overlapping Datasets | 常规训练 / 验证 | [DANDI 000034](https://dandiarchive.org/dandiset/000034) |
-| Drifting Datasets | 漂移场景下的零样本（zero-shot）迁移评估 | [Steinmetz et al., Science 2021](https://figshare.com/articles/dataset/_Imposed_motion_datasets_from_Steinmetz_et_al_Science_2021/14024495) |
+| Overlapping Datasets | 急性记录常规混叠场景下重建能力评估 / 验证 | [DANDI 000034](https://dandiarchive.org/dandiset/000034) |
+| Drifting Datasets | 漂移场景下重建能力评估 | [Steinmetz et al., Science 2021](https://figshare.com/articles/dataset/_Imposed_motion_datasets_from_Steinmetz_et_al_Science_2021/14024495) |
 | Transfer Evaluation Dataset | 迁移评估（小规模数据集） | [Zenodo 3696926](https://zenodo.org/records/3696926) |
 
 ## 环境安装
@@ -85,13 +85,13 @@ python main_meafile_v2.py
 - 相比 Kriging，深度学习方法对损坏通道上的神经元波形重建精度更高；
 - 损坏通道越多，重建难度越大，误差越高。
 
-### 2. Drifting Datasets（漂移迁移）
+### 2. Drifting Datasets
 
 - 将其他电极上预训练好的权重**直接 zero-shot** 到相同漂移模式的数据上，可以将 MSE 压到很低；但 **MSE 低并不等于重建效果好**——需要结合下游 spike sorter 的聚类质量综合评估。
 
 ### 3. Transfer Evaluation Dataset
 
-- 与前两个数据集相比，该数据集需要更高的训练数据占比。主要原因是该数据集时长很短（300 s）：若训练占比 30% 仅约 90 s，此时很多神经元尚未开始发放；
+- 与前两个数据集相比，该数据集需要更高的训练数据占比。主要原因是该数据集时长很短（300 s）：若训练占比 30% 仅约 90 s，我们认为此时很多神经元尚未开始发放，导致模型未能充分学习到发放模式；
 - **zero-shot 到不同电极会发生灾难性遗忘（catastrophic forgetting）**，因此需要 few-shot 或持续学习（相关实验见 `options_linux_list` 中的 `ewc` / `kd` / `l2` 等变体配置）。
 
 ## 存在不足与未来方向
