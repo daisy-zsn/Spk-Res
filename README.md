@@ -63,10 +63,10 @@ All parameters are set via YAML files under `options_linux/` and `options_linux_
 
 ### 2. Run the pipeline
 
-Taking `.bin` recordings as an example (`main_binfile_v2.py`):
+Taking `.h5` recordings as an example (`main_meafile_v2.py`):
 
 ```bash
-python main_binfile_v2.py
+python main_meafile_v2.py
 ```
 
 The full pipeline consists of four stages:

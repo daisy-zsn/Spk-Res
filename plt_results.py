@@ -502,7 +502,6 @@ def plot_efficiency_comparison(df, electrode='np128', save_path=None):
             print(f'[Saved] {base}_{metric_col}.{ext}')
         plt.close(fig)
 
-
 # ============================================================
 # 图 5: Zero-shot vs Few-shot 迁移对比 (sq100 目标域)
 # ============================================================
